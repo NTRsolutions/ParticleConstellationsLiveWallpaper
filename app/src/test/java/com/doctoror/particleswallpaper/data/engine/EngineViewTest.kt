@@ -73,8 +73,8 @@ class EngineViewTest {
         underTest.setDimensions(width, height)
 
         // Then
-        assertEquals(width, underTest.drawable.bounds.width())
-        assertEquals(height, underTest.drawable.bounds.height())
+        assertEquals(width, underTest.renderer.bounds.width())
+        assertEquals(height, underTest.renderer.bounds.height())
     }
 
     @Test

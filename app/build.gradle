@@ -93,7 +93,8 @@ dependencies {
     implementation d.rxJava
     implementation d.rxAndroid
 
-    implementation d.particlesDrawable
+    implementation project(':particlesdrawable')
+    //implementation d.particlesDrawable
     implementation d.colorPicker
 
     implementation d.supportV4

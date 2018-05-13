@@ -16,16 +16,14 @@
 package com.doctoror.particleswallpaper.presentation.config
 
 import android.content.Intent
-import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
-import android.view.View
 import android.widget.ImageView
 import android.widget.Toast
+import com.doctoror.particlesdrawable.ParticlesView
 import com.doctoror.particleswallpaper.R
 import com.doctoror.particleswallpaper.presentation.base.LifecycleActivity
-import com.doctoror.particleswallpaper.presentation.extensions.setBackgroundCompat
 import dagger.android.AndroidInjection
 import javax.inject.Inject
 
@@ -34,12 +32,28 @@ class ConfigActivity : LifecycleActivity(), ConfigActivityView {
     @Inject
     lateinit var presenter: ConfigActivityPresenter
 
+    private var view: ParticlesView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AndroidInjection.inject(this)
 
         setContentView(R.layout.activity_config)
         lifecycle.addObserver(presenter)
+
+        view = findViewById(R.id.particlesView)
+        presenter.configuration = view
+        presenter.controller = view
+    }
+
+    override fun onStart() {
+        super.onStart()
+        view?.start()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        view?.stop()
     }
 
     override fun getBackgroundView() = findViewById<ImageView>(R.id.bg)!!
@@ -51,10 +65,6 @@ class ConfigActivity : LifecycleActivity(), ConfigActivityView {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         presenter.onActivityResult(requestCode, resultCode)
-    }
-
-    override fun setContainerBackground(drawable: Drawable) {
-        findViewById<View>(R.id.drawableContainer).setBackgroundCompat(drawable)
     }
 
     override fun showWallpaperPreviewStartFailed() {

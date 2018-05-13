@@ -73,7 +73,7 @@ class EnginePresenterTest {
     fun subscribesToConfigurator() {
         // Given
         val drawable: ParticlesDrawable = mock()
-        whenever(view.drawable).thenReturn(drawable)
+        whenever(view.renderer).thenReturn(drawable)
 
         // When
         underTest.onCreate()

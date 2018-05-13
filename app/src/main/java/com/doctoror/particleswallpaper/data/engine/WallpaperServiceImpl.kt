@@ -16,23 +16,33 @@
 package com.doctoror.particleswallpaper.data.engine
 
 import android.annotation.TargetApi
+import android.opengl.GLSurfaceView
 import android.os.Build
+import android.os.Handler
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import com.bumptech.glide.Glide
+import com.doctoror.particlesdrawable.ParticlesScene
+import com.doctoror.particlesdrawable.ScenePresenter
+import com.doctoror.particlesdrawable.contract.SceneScheduler
+import com.doctoror.particlesdrawable.renderer.GlSceneRenderer
 import com.doctoror.particleswallpaper.domain.config.ApiLevelProvider
 import com.doctoror.particleswallpaper.domain.config.SceneConfiguratorFactory
 import com.doctoror.particleswallpaper.domain.execution.SchedulersProvider
 import com.doctoror.particleswallpaper.domain.repository.SettingsRepository
+import com.doctoror.particleswallpaper.scheduler.GlScheduler
 import dagger.android.AndroidInjection
+import net.rbgrn.android.glwallpaperservice.GLWallpaperService
 import javax.inject.Inject
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
 
 /**
  * Created by Yaroslav Mytkalyk on 18.04.17.
  *
  * The [WallpaperService] implementation.
  */
-class WallpaperServiceImpl : WallpaperService() {
+class WallpaperServiceImpl : GLWallpaperService() {
 
     @Inject
     lateinit var apiLevelProvider: ApiLevelProvider
@@ -52,24 +62,37 @@ class WallpaperServiceImpl : WallpaperService() {
     }
 
     override fun onCreateEngine(): Engine {
-        val engine = EngineImpl()
-        val view = EngineView(engine)
+        val scene = ParticlesScene()
+        val renderer = GlSceneRenderer()
+        val engine = EngineImpl(renderer)
+        val scenePresenter = ScenePresenter(scene, renderer, engine)
+
         engine.presenter = EnginePresenter(
                 apiLevelProvider,
                 configuratorFactory.newSceneConfigurator(),
                 engine,
+                GlScheduler(engine),
                 Glide.with(this),
+                renderer,
                 schedulers,
                 settings,
-                view)
+                scene,
+                scenePresenter)
+
         return engine
     }
 
-    inner class EngineImpl : Engine(), EngineController, SurfaceHolderProvider {
+    inner class EngineImpl(private val renderer: GlSceneRenderer)
+        : GLEngine(), EngineController, GLSurfaceView.Renderer, SceneScheduler {
+
+        private val handler = Handler()
 
         lateinit var presenter: EnginePresenter
 
-        override fun provideSurfaceHolder() = surfaceHolder!!
+        init {
+            setRenderer(this)
+            renderMode = RENDERMODE_WHEN_DIRTY
+        }
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
@@ -81,9 +104,17 @@ class WallpaperServiceImpl : WallpaperService() {
             presenter.onDestroy()
         }
 
-        override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-            super.onSurfaceChanged(holder, format, width, height)
+        override fun onSurfaceCreated(gl: GL10, config: EGLConfig?) {
+            renderer.setupGl(gl)
+        }
+
+        override fun onSurfaceChanged(gl: GL10, width: Int, height: Int) {
+            renderer.setDimensions(gl, width, height)
             presenter.setDimensions(width, height)
+        }
+
+        override fun onDrawFrame(gl: GL10) {
+            presenter.onDrawFrame(gl)
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
@@ -98,5 +129,23 @@ class WallpaperServiceImpl : WallpaperService() {
 
         @TargetApi(Build.VERSION_CODES.O_MR1)
         override fun onComputeColors() = presenter.onComputeColors()
+
+        override fun scheduleNextFrame(delay: Long) {
+            if (delay == 0L) {
+                requestRender()
+            } else {
+                handler.postDelayed(renderRunnable, delay)
+            }
+        }
+
+        override fun unscheduleNextFrame() {
+            handler.removeCallbacks(renderRunnable)
+        }
+
+        override fun invalidate() {
+            requestRender()
+        }
+
+        private val renderRunnable = this::requestRender
     }
 }
