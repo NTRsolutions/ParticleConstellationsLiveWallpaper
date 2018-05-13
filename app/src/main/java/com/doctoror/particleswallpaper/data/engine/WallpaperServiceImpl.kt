@@ -17,14 +17,18 @@ package com.doctoror.particleswallpaper.data.engine
 
 import android.annotation.TargetApi
 import android.os.Build
+import android.os.Handler
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import com.bumptech.glide.Glide
+import com.doctoror.particlesdrawable.GLParticlesSceneRenderer
+import com.doctoror.particlesdrawable.SceneScheduler
 import com.doctoror.particleswallpaper.domain.config.ApiLevelProvider
 import com.doctoror.particleswallpaper.domain.config.SceneConfiguratorFactory
 import com.doctoror.particleswallpaper.domain.execution.SchedulersProvider
 import com.doctoror.particleswallpaper.domain.repository.SettingsRepository
 import dagger.android.AndroidInjection
+import net.rbgrn.android.glwallpaperservice.GLWallpaperService
 import javax.inject.Inject
 
 /**
@@ -32,7 +36,7 @@ import javax.inject.Inject
  *
  * The [WallpaperService] implementation.
  */
-class WallpaperServiceImpl : WallpaperService() {
+class WallpaperServiceImpl : GLWallpaperService() {
 
     @Inject
     lateinit var apiLevelProvider: ApiLevelProvider
@@ -52,8 +56,11 @@ class WallpaperServiceImpl : WallpaperService() {
     }
 
     override fun onCreateEngine(): Engine {
-        val engine = EngineImpl()
-        val view = EngineView(engine)
+        val renderer = GLParticlesSceneRenderer()
+        val engine = EngineImpl(renderer)
+        renderer.setSceneScheduler(engine)
+
+        val view = EngineView(renderer)
         engine.presenter = EnginePresenter(
                 apiLevelProvider,
                 configuratorFactory.newSceneConfigurator(),
@@ -61,15 +68,22 @@ class WallpaperServiceImpl : WallpaperService() {
                 Glide.with(this),
                 schedulers,
                 settings,
+                renderer,
                 view)
         return engine
     }
 
-    inner class EngineImpl : Engine(), EngineController, SurfaceHolderProvider {
+    inner class EngineImpl(renderer: GLParticlesSceneRenderer)
+        : GLEngine(), EngineController, SceneScheduler {
+
+        private val handler = Handler()
 
         lateinit var presenter: EnginePresenter
 
-        override fun provideSurfaceHolder() = surfaceHolder!!
+        init {
+            setRenderer(renderer)
+            renderMode = RENDERMODE_WHEN_DIRTY
+        }
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
@@ -98,5 +112,23 @@ class WallpaperServiceImpl : WallpaperService() {
 
         @TargetApi(Build.VERSION_CODES.O_MR1)
         override fun onComputeColors() = presenter.onComputeColors()
+
+        override fun scheduleNextFrame(delay: Long) {
+            if (delay == 0L) {
+                requestRender()
+            } else {
+                handler.postDelayed(renderRunnable, delay)
+            }
+        }
+
+        override fun unscheduleNextFrame() {
+            handler.removeCallbacks(renderRunnable)
+        }
+
+        override fun invalidate() {
+            requestRender()
+        }
+
+        private val renderRunnable = this::requestRender
     }
 }

@@ -22,15 +22,13 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
 import android.support.annotation.VisibleForTesting
 import com.bumptech.glide.RequestManager
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.request.target.SimpleTarget
 import com.bumptech.glide.request.transition.Transition
+import com.doctoror.particlesdrawable.GLParticlesSceneRenderer
 import com.doctoror.particleswallpaper.domain.config.ApiLevelProvider
 import com.doctoror.particleswallpaper.domain.config.SceneConfigurator
 import com.doctoror.particleswallpaper.domain.execution.SchedulersProvider
@@ -45,14 +43,10 @@ class EnginePresenter(
         private val glide: RequestManager,
         private val schedulers: SchedulersProvider,
         private val settings: SettingsRepository,
-        private val view: EngineView) : Runnable {
-
-    private val defaultDelay = 10L
-    private val minDelay = 5L
+        private val renderer: GLParticlesSceneRenderer,
+        private val view: EngineView) {
 
     private val disposables = CompositeDisposable()
-
-    private val handler = Handler(Looper.getMainLooper())
 
     @VisibleForTesting
     var width = 0
@@ -64,10 +58,6 @@ class EnginePresenter(
 
     @VisibleForTesting
     var backgroundUri: String? = null
-        private set
-
-    @VisibleForTesting
-    var delay = defaultDelay
         private set
 
     private var lastUsedImageLoadTarget: ImageLoadTarget? = null
@@ -83,11 +73,11 @@ class EnginePresenter(
     var run = false
 
     fun onCreate() {
-        configurator.subscribe(view.drawable, settings)
+        configurator.subscribe(renderer, settings)
 
         disposables.add(settings.getFrameDelay()
                 .observeOn(schedulers.mainThread())
-                .subscribe { delay = it.toLong() })
+                .subscribe { renderer.frameDelay = it })
 
         disposables.add(settings.getBackgroundColor()
                 .doOnNext {
@@ -144,24 +134,12 @@ class EnginePresenter(
         handleBackground(settings.getBackgroundUri().blockingFirst())
     }
 
-    override fun run() {
-        handler.removeCallbacks(this)
-        if (run) {
-            val startTime = SystemClock.uptimeMillis()
-            view.draw()
-            handler.postDelayed(this,
-                    Math.max(delay - (SystemClock.uptimeMillis() - startTime), minDelay))
-        }
-    }
-
     private fun handleRunConstraints() {
         if (run != visible) {
             run = visible
             if (run) {
                 view.start()
-                handler.post(this)
             } else {
-                handler.removeCallbacks(this)
                 view.stop()
             }
         }

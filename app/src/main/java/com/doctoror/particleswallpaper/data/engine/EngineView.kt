@@ -22,17 +22,12 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.support.annotation.ColorInt
 import android.support.annotation.VisibleForTesting
-import android.util.Log
 import android.view.SurfaceHolder
-import com.doctoror.particlesdrawable.ParticlesDrawable
+import com.doctoror.particlesdrawable.GLParticlesSceneRenderer
 
-class EngineView(private val surfaceHolderProvider: SurfaceHolderProvider) {
-
-    private val tag = "EngineView"
+class EngineView(private val renderer: GLParticlesSceneRenderer) {
 
     val backgroundPaint = Paint()
-
-    val drawable = ParticlesDrawable()
 
     var background: Drawable? = null
 
@@ -55,49 +50,25 @@ class EngineView(private val surfaceHolderProvider: SurfaceHolderProvider) {
 
     fun setBackgroundColor(@ColorInt color: Int) {
         backgroundPaint.color = color
+        renderer.setBackgroundColor(color)
     }
 
     fun setDimensions(width: Int, height: Int) {
         this.width = width
         this.height = height
-        drawable.setBounds(0, 0, width, height)
+        renderer.setDimensions(width, height)
         background?.setBounds(0, 0, width, height)
         surfaceHolder = null
     }
 
     fun start() {
         surfaceHolder = null
-        drawable.start()
+        renderer.start()
     }
 
     fun stop() {
-        drawable.stop()
+        renderer.stop()
         surfaceHolder = null
-    }
-
-    fun draw() {
-        var holder = surfaceHolder
-        if (holder == null) {
-            holder = surfaceHolderProvider.provideSurfaceHolder()
-            surfaceHolder = holder
-        }
-        var canvas: Canvas? = null
-        try {
-            canvas = holder.lockCanvas()
-            if (canvas != null) {
-                drawBackground(canvas)
-                drawable.draw(canvas)
-                drawable.nextFrame()
-            }
-        } finally {
-            canvas?.let {
-                try {
-                    holder.unlockCanvasAndPost(it)
-                } catch (e: IllegalArgumentException) {
-                    Log.wtf(tag, e)
-                }
-            }
-        }
     }
 
     fun resetSurfaceCache() {
