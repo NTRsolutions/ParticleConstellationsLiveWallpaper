@@ -23,13 +23,19 @@ import javax.microedition.khronos.opengles.GL10;
 
 public final class GlSceneRenderer implements SceneRenderer {
 
+    private static final int TEXTURE_PARTICLE = 0;
+    private static final int TEXTURE_BACKGROUND = 1;
+
     private static final int BYTES_PER_SHORT = 2;
     private static final int COORDINATES_PER_VERTEX = 2;
     private static final int COLOR_BYTES_PER_VERTEX = 4;
     private static final int VERTICES_PER_PARTICLE = 6;
     private static final int VERTICES_PER_LINE = 2;
 
-    private final int[] textureHandle = new int[1];
+    private final int[] textureHandle = new int[2];
+
+    private ShortBuffer backgroundCoordinates;
+    private ByteBuffer backgroundTextureCoordinates;
 
     private ByteBuffer lineColorBuffer;
     private ShortBuffer lineCoordinatesBuffer;
@@ -37,14 +43,18 @@ public final class GlSceneRenderer implements SceneRenderer {
     private ShortBuffer particlesTrianglesCoordinates;
     private ByteBuffer particlesTexturesCoordinates;
 
-    private volatile boolean textureDirty;
+    private volatile boolean particleTextureDirty;
+    private volatile boolean backgroundCoordinatesDirty;
+
+    private short width;
+    private short height;
 
     private int lineCount;
 
     private GL10 gl;
 
-    public void markTextureDirty() {
-        textureDirty = true;
+    public void markParticleTextureDirty() {
+        particleTextureDirty = true;
     }
 
     @NonNull
@@ -81,9 +91,15 @@ public final class GlSceneRenderer implements SceneRenderer {
         gl.glEnable(GL10.GL_BLEND);
         gl.glBlendFunc(GL10.GL_SRC_ALPHA, GL10.GL_ONE_MINUS_SRC_ALPHA);
 
-        gl.glEnable(GL10.GL_TEXTURE_2D);
+        markParticleTextureDirty();
+    }
 
-        markTextureDirty();
+    private void reloadTextureIfDirty(
+            @ColorInt final int color,
+            final float maxParticleRadius) {
+        if (particleTextureDirty) {
+            generateAndLoadTexture(color, maxParticleRadius);
+        }
     }
 
     private void generateAndLoadTexture(
@@ -94,25 +110,33 @@ public final class GlSceneRenderer implements SceneRenderer {
         texture.recycle();
     }
 
-    private void reloadTextureIfDirty(
-            @ColorInt final int color,
-            final float maxParticleRadius) {
-        if (textureDirty) {
-            generateAndLoadTexture(color, maxParticleRadius);
-        }
-    }
-
-    public void setGl(@Nullable final GL10 gl) {
-        this.gl = gl;
-    }
-
     private void loadParticleTexture(
             @NonNull final GL10 gl,
             @NonNull final Bitmap texture) {
-        gl.glDeleteTextures(1, textureHandle, 0);
+        loadTexture(gl, texture, TEXTURE_PARTICLE);
+        particleTextureDirty = false;
+    }
 
-        gl.glGenTextures(1, textureHandle, 0);
-        gl.glBindTexture(GL10.GL_TEXTURE_2D, textureHandle[0]);
+    public void setBackgroundTexture(
+            @NonNull final GL10 gl,
+            @NonNull final Bitmap texture) {
+        loadTexture(gl, texture, TEXTURE_BACKGROUND);
+    }
+
+    public void clearBackgroundTexture(@NonNull final GL10 gl) {
+        gl.glDeleteTextures(1, textureHandle, TEXTURE_BACKGROUND);
+    }
+
+    private void loadTexture(
+            @NonNull final GL10 gl,
+            @NonNull final Bitmap texture,
+            final int handleOffset) {
+        gl.glDeleteTextures(1, textureHandle, handleOffset);
+
+        gl.glGenTextures(1, textureHandle, handleOffset);
+        gl.glBindTexture(GL10.GL_TEXTURE_2D, textureHandle[handleOffset]);
+
+        gl.glTexEnvf(GL10.GL_TEXTURE_ENV, GL10.GL_TEXTURE_ENV_MODE, GL10.GL_REPLACE);
 
         gl.glTexParameterf(GL10.GL_TEXTURE_2D, GL10.GL_TEXTURE_MIN_FILTER, GL10.GL_LINEAR);
         gl.glTexParameterf(GL10.GL_TEXTURE_2D, GL10.GL_TEXTURE_MAG_FILTER, GL10.GL_LINEAR);
@@ -120,16 +144,22 @@ public final class GlSceneRenderer implements SceneRenderer {
         gl.glTexParameterf(GL10.GL_TEXTURE_2D, GL10.GL_TEXTURE_WRAP_S, GL10.GL_CLAMP_TO_EDGE);
         gl.glTexParameterf(GL10.GL_TEXTURE_2D, GL10.GL_TEXTURE_WRAP_T, GL10.GL_CLAMP_TO_EDGE);
 
-        gl.glTexEnvf(GL10.GL_TEXTURE_ENV, GL10.GL_TEXTURE_ENV_MODE, GL10.GL_REPLACE);
-
         GLUtils.texImage2D(GL10.GL_TEXTURE_2D, 0, texture, 0);
-
-        textureDirty = false;
     }
 
     public void setDimensions(@NonNull final GL10 gl, final int width, final int height) {
+        if (width >= Short.MAX_VALUE || height >= Short.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "Width nor height must not be as large as Short capacity");
+        }
+
         gl.glViewport(0, 0, width, height);
         gl.glOrthof(0, width, 0, height, 1, -1);
+
+        this.width = (short) width;
+        this.height = (short) height;
+
+        backgroundCoordinatesDirty = true;
     }
 
     public void recycle(@NonNull final GL10 gl) {
@@ -151,6 +181,51 @@ public final class GlSceneRenderer implements SceneRenderer {
 
     private int segmentsCount(final int vertices) {
         return (vertices * (vertices - 1)) / 2;
+    }
+
+    private void initBackgroundCooridnates() {
+        if (backgroundCoordinates == null) {
+            final ByteBuffer coordinatesByteBuffer = ByteBuffer.allocateDirect(12 * BYTES_PER_SHORT);
+            coordinatesByteBuffer.order(ByteOrder.nativeOrder());
+            backgroundCoordinates = coordinatesByteBuffer.asShortBuffer();
+            backgroundCoordinatesDirty = true;
+        }
+        if (backgroundCoordinatesDirty) {
+            backgroundCoordinates.clear();
+
+            backgroundCoordinates.put((short) 0);
+            backgroundCoordinates.put((short) 0);
+
+            backgroundCoordinates.put(width);
+            backgroundCoordinates.put((short) 0);
+
+            backgroundCoordinates.put(width);
+            backgroundCoordinates.put(height);
+
+            backgroundCoordinates.put((short) 0);
+            backgroundCoordinates.put((short) 0);
+
+            backgroundCoordinates.put((short) 0);
+            backgroundCoordinates.put(height);
+
+            backgroundCoordinates.put(width);
+            backgroundCoordinates.put(height);
+
+            backgroundCoordinatesDirty = false;
+        }
+    }
+
+    private void initBackgroundTextureCoordiantes() {
+        if (backgroundTextureCoordinates == null) {
+            backgroundTextureCoordinates = ByteBuffer.allocateDirect(6);
+            backgroundTextureCoordinates.order(ByteOrder.nativeOrder());
+            backgroundTextureCoordinates.put((byte) 0);
+            backgroundTextureCoordinates.put((byte) 1);
+            backgroundTextureCoordinates.put((byte) 0);
+            backgroundTextureCoordinates.put((byte) 0);
+            backgroundTextureCoordinates.put((byte) 1);
+            backgroundTextureCoordinates.put((byte) 0);
+        }
     }
 
     private void initLineCoordinates(final int segmentsCount) {
@@ -199,6 +274,10 @@ public final class GlSceneRenderer implements SceneRenderer {
         }
     }
 
+    public void setGl(@Nullable final GL10 gl) {
+        this.gl = gl;
+    }
+
     @Override
     public void drawScene(
             @NonNull final ParticlesScene scene) {
@@ -209,7 +288,7 @@ public final class GlSceneRenderer implements SceneRenderer {
         resolveLines(scene);
         resolveParticleTriangles(scene);
 
-        gl.glClear(GL10.GL_COLOR_BUFFER_BIT | GL10.GL_DEPTH_BUFFER_BIT);
+        clearOrDrawBackground();
 
         drawLines();
         drawParticles(scene.getNumDots());
@@ -278,6 +357,33 @@ public final class GlSceneRenderer implements SceneRenderer {
         }
     }
 
+    private void clearOrDrawBackground() {
+        if (textureHandle[TEXTURE_BACKGROUND] == 0) {
+            gl.glClear(GL10.GL_COLOR_BUFFER_BIT | GL10.GL_DEPTH_BUFFER_BIT);
+        } else {
+            initBackgroundTextureCoordiantes();
+            initBackgroundCooridnates();
+
+            backgroundTextureCoordinates.position(0);
+            backgroundCoordinates.position(0);
+
+            gl.glEnable(GL10.GL_TEXTURE_2D);
+            gl.glEnableClientState(GL10.GL_VERTEX_ARRAY);
+            gl.glEnableClientState(GL10.GL_TEXTURE_COORD_ARRAY);
+
+            gl.glActiveTexture(GL10.GL_TEXTURE1);
+            gl.glBindTexture(GL10.GL_TEXTURE_2D, textureHandle[TEXTURE_BACKGROUND]);
+
+            gl.glTexCoordPointer(2, GL10.GL_BYTE, 0, backgroundTextureCoordinates);
+            gl.glVertexPointer(2, GL10.GL_SHORT, 0, backgroundCoordinates);
+            gl.glDrawArrays(GL10.GL_TRIANGLES, 0, 2);
+
+            gl.glDisableClientState(GL10.GL_TEXTURE_COORD_ARRAY);
+            gl.glDisableClientState(GL10.GL_VERTEX_ARRAY);
+            gl.glDisable(GL10.GL_TEXTURE_2D);
+        }
+    }
+
     private void drawLines() {
         lineCoordinatesBuffer.position(0);
         lineColorBuffer.position(0);
@@ -327,11 +433,15 @@ public final class GlSceneRenderer implements SceneRenderer {
     }
 
     private void drawParticles(final int count) {
+        gl.glEnable(GL10.GL_TEXTURE_2D);
         gl.glEnableClientState(GL10.GL_VERTEX_ARRAY);
         gl.glEnableClientState(GL10.GL_TEXTURE_COORD_ARRAY);
 
         particlesTexturesCoordinates.position(0);
         particlesTrianglesCoordinates.position(0);
+
+        gl.glActiveTexture(GL10.GL_TEXTURE0);
+        gl.glBindTexture(GL10.GL_TEXTURE_2D, textureHandle[TEXTURE_PARTICLE]);
 
         gl.glTexCoordPointer(2, GL10.GL_BYTE, 0, particlesTexturesCoordinates);
         gl.glVertexPointer(2, GL10.GL_SHORT, 0, particlesTrianglesCoordinates);
@@ -339,5 +449,6 @@ public final class GlSceneRenderer implements SceneRenderer {
 
         gl.glDisableClientState(GL10.GL_TEXTURE_COORD_ARRAY);
         gl.glDisableClientState(GL10.GL_VERTEX_ARRAY);
+        gl.glDisable(GL10.GL_TEXTURE_2D);
     }
 }

@@ -19,9 +19,7 @@ import android.annotation.TargetApi
 import android.app.WallpaperColors
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
 import android.os.Build
 import android.support.annotation.ColorInt
 import android.support.annotation.VisibleForTesting
@@ -70,10 +68,13 @@ class EnginePresenter(
         private set
 
     @VisibleForTesting
-    var background: Drawable? = null
+    var background: Bitmap? = null
 
     @ColorInt
     var backgroundColor = Color.DKGRAY
+
+    private var backgroundDirty = false
+    private var backgroundColorDirty = true
 
     private var lastUsedImageLoadTarget: ImageLoadTarget? = null
 
@@ -97,6 +98,7 @@ class EnginePresenter(
         disposables.add(settings.getBackgroundColor()
                 .doOnNext {
                     backgroundColor = it
+                    backgroundDirty = true
                     if (backgroundUri != null) {
                         // If background was already loaded, but color is changed afterwards.
                         notifyBackgroundColors()
@@ -127,6 +129,7 @@ class EnginePresenter(
             } else if (width != 0 && height != 0) {
                 val target = ImageLoadTarget(width, height)
                 glide
+                        .asBitmap()
                         .load(uri)
                         .apply(RequestOptions.noAnimation())
                         .apply(RequestOptions.diskCacheStrategyOf(DiskCacheStrategy.NONE))
@@ -144,7 +147,6 @@ class EnginePresenter(
         AndroidSchedulers.mainThread().scheduleDirect {
             this.width = width
             this.height = height
-            background?.setBounds(0, 0, width, height)
 
             // Force re-apply background
             backgroundUri = null
@@ -153,7 +155,21 @@ class EnginePresenter(
     }
 
     fun onDrawFrame(gl: GL10) {
-        renderer.setClearColor(gl, backgroundColor)
+        if (backgroundDirty) {
+            backgroundDirty = false
+            with(background) {
+                if (this != null) {
+                    renderer.setBackgroundTexture(gl, this)
+                } else {
+                    renderer.clearBackgroundTexture(gl)
+                }
+            }
+        }
+
+        if (backgroundColorDirty) {
+            backgroundColorDirty = false
+            renderer.setClearColor(gl, backgroundColor)
+        }
 
         renderer.setGl(gl)
         scenePresenter.draw()
@@ -184,30 +200,25 @@ class EnginePresenter(
         val background = background
         val colors: WallpaperColors
         if (background != null) {
-            colors = WallpaperColors.fromDrawable(background)
-            background.setBounds(0, 0, width, height)
+            colors = WallpaperColors.fromBitmap(background)
         } else {
             colors = WallpaperColors.fromDrawable(ColorDrawable(backgroundColor))
         }
         return colors
     }
 
-    private inner class ImageLoadTarget(private val width: Int, private val height: Int)
-        : SimpleTarget<Drawable>(width, height) {
+    private inner class ImageLoadTarget(width: Int, height: Int)
+        : SimpleTarget<Bitmap>(width, height) {
 
-        override fun onResourceReady(resource: Drawable, transition: Transition<in Drawable>?) {
-            resource.setBounds(0, 0, width, height)
+        override fun onResourceReady(resource: Bitmap, transition: Transition<in Bitmap>?) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                if (resource is BitmapDrawable) {
-                    resource.bitmap?.let {
-                        if (it.config == Bitmap.Config.ARGB_8888
-                                && it.hasAlpha() && !it.isPremultiplied) {
-                            it.isPremultiplied = true
-                        }
-                    }
+                if (resource.config == Bitmap.Config.ARGB_8888
+                        && resource.hasAlpha() && !resource.isPremultiplied) {
+                    resource.isPremultiplied = true
                 }
             }
             background = resource
+            backgroundDirty = true
             notifyBackgroundColors()
         }
     }
