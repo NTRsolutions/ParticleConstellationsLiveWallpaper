@@ -53,6 +53,8 @@ class EnginePresenter(
         private val scenePresenter: ScenePresenter,
         private val textureDimensionsCalculator: TextureDimensionsCalculator) {
 
+    private val backgroundLock = Any()
+
     private val disposables = CompositeDisposable()
 
     @VisibleForTesting
@@ -68,7 +70,6 @@ class EnginePresenter(
         private set
 
     @VisibleForTesting
-    @Volatile
     var background: Bitmap? = null
 
     @VisibleForTesting
@@ -81,6 +82,10 @@ class EnginePresenter(
     var optimizeTextures = true
 
     private var backgroundDirty = false
+    private var backgroundColorsNotified = false
+    private var backgroundAppliedToRenderer = false
+
+    @Volatile
     private var backgroundColorDirty = false
 
     private var lastUsedImageLoadSettings: ImageLoadSettings? = null
@@ -195,14 +200,22 @@ class EnginePresenter(
     }
 
     fun onSurfaceCreated() {
-        backgroundDirty = true
         backgroundColorDirty = true
     }
 
     fun onDrawFrame() {
-        if (backgroundDirty) {
-            backgroundDirty = false
-            renderer.setBackgroundTexture(background)
+        synchronized(backgroundLock) {
+            if (backgroundDirty) {
+                backgroundDirty = false
+                println("Set background bitch")
+                renderer.setBackgroundTexture(background)
+                backgroundAppliedToRenderer = true
+                recycleBackgroundIfPossible()
+                if (lastUsedImageLoadTarget != null) {
+                    glide.clear(lastUsedImageLoadTarget)
+                    lastUsedImageLoadTarget = null
+                }
+            }
         }
 
         if (backgroundColorDirty) {
@@ -212,6 +225,19 @@ class EnginePresenter(
 
         scenePresenter.draw()
         scenePresenter.run()
+    }
+
+    private fun markBackgroundDirty() {
+        backgroundDirty = true
+        backgroundColorsNotified = false
+        backgroundAppliedToRenderer = false
+    }
+
+    private fun recycleBackgroundIfPossible() {
+        if (backgroundColorsNotified && backgroundAppliedToRenderer) {
+            background?.recycle()
+            background = null
+        }
     }
 
     private fun handleRunConstraints() {
@@ -228,17 +254,24 @@ class EnginePresenter(
     private fun notifyBackgroundColors() {
         if (apiLevelProvider.provideSdkInt() >= Build.VERSION_CODES.O_MR1) {
             controller.notifyColorsChanged()
+        } else {
+            synchronized(backgroundLock) {
+                backgroundColorsNotified = true
+                recycleBackgroundIfPossible()
+            }
         }
     }
 
     @TargetApi(Build.VERSION_CODES.O_MR1)
-    fun onComputeColors(): WallpaperColors {
-        val background = background
-        return if (background != null) {
+    fun onComputeColors(): WallpaperColors = synchronized(backgroundLock) {
+        val result = if (background != null) {
             WallpaperColors.fromBitmap(background)
         } else {
             WallpaperColors.fromDrawable(ColorDrawable(backgroundColor))
         }
+        backgroundColorsNotified = true
+        recycleBackgroundIfPossible()
+        result
     }
 
     private data class ImageLoadSettings(
@@ -257,8 +290,10 @@ class EnginePresenter(
                     resource.isPremultiplied = true
                 }
             }
-            background = resource
-            backgroundDirty = true
+            synchronized(backgroundLock) {
+                background = resource
+                markBackgroundDirty()
+            }
             notifyBackgroundColors()
         }
     }
