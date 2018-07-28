@@ -268,8 +268,10 @@ class EnginePresenter(
         } else {
             WallpaperColors.fromDrawable(ColorDrawable(backgroundColor))
         }
-        backgroundColorsNotified = true
-        recycleBackgroundIfPossible()
+        synchronized(backgroundLock) {
+            backgroundColorsNotified = true
+            recycleBackgroundIfPossible()
+        }
         result
     }
 
