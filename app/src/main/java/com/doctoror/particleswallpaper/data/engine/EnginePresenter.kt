@@ -207,7 +207,6 @@ class EnginePresenter(
         synchronized(backgroundLock) {
             if (backgroundDirty) {
                 backgroundDirty = false
-                println("Set background bitch")
                 renderer.setBackgroundTexture(background)
                 backgroundAppliedToRenderer = true
                 recycleBackgroundIfPossible()
